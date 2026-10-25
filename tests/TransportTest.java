@@ -62,6 +62,7 @@ public class TransportTest {
                 else if (mode.equals("format")) code = "704";
                 else if (mode.equals("cancelSet")) current.set(false);
             } else if (action.equals("GetPositionInfo")) {
+                if (mode.equals("rejectPosition")) code = "401";
                 String rel = mode.equals("nullTime") ? "NOT_IMPLEMENTED" : "00:01:12";
                 payload = "<u:GetPositionInfoResponse xmlns:u='urn:schemas-upnp-org:service:AVTransport:1'>"
                         + "<RelTime>" + rel + "</RelTime><TrackDuration>00:22:00</TrackDuration>"
@@ -133,6 +134,37 @@ public class TransportTest {
             controller.seekBy(tv, 30000, error -> { rejectError.set(error); rejectDone.countDown(); });
             check(rejectDone.await(4, TimeUnit.SECONDS) && rejectError.get() != null
                     && rejectError.get().contains("710"), "Renderer seek rejection is reported");
+            PlaybackState observed = new PlaybackState();
+            for (String receiverState : new String[]{"PLAYING", "PAUSED_PLAYBACK", "TRANSITIONING", "STOPPED", "NO_MEDIA_PRESENT"}) {
+                reset(receiverState, "rejectPosition");
+                CountDownLatch observedDone = new CountDownLatch(1);
+                AtomicReference<DlnaController.Playback> snapshot = new AtomicReference<>();
+                controller.getPlayback(tv, (p, error) -> { snapshot.set(p); observedDone.countDown(); });
+                check(observedDone.await(4, TimeUnit.SECONDS) && snapshot.get() != null
+                        && receiverState.equals(snapshot.get().state), "Transport state survives unavailable position: " + receiverState);
+                observed.update(snapshot.get());
+                boolean ended = receiverState.equals("STOPPED") || receiverState.equals("NO_MEDIA_PRESENT");
+                check(observed.terminal() == ended && observed.active() != ended,
+                        "UI follows actual receiver state: " + receiverState);
+                check(!events.contains("Stop") && !events.contains("Play"), "Monitoring never controls playback");
+            }
+            observed.update(new DlnaController.Playback("PLAYING", "OK", null));
+            observed.update(null);
+            check(!observed.active() && !observed.terminal() && observed.label().contains("verificando"),
+                    "One failed query clears stale playing without declaring a stop");
+            observed.update(null); observed.update(null);
+            check(observed.label().contains("sem resposta") && !observed.terminal(),
+                    "Repeated failures show unreachable without destroying the stream");
+            observed.update(new DlnaController.Playback("PLAYING", "OK", null));
+            check(observed.active() && observed.label().contains("reproduzindo"), "Monitoring recovers after connectivity returns");
+            observed.update(new DlnaController.Playback("PLAYING", "ERROR_OCCURRED", null));
+            check(observed.terminal() && !observed.active(), "Receiver error overrides stale PLAYING state");
+            reset("", "ok");
+            CountDownLatch missingDone = new CountDownLatch(1);
+            AtomicReference<String> missingError = new AtomicReference<>();
+            controller.getPlayback(tv, (p, error) -> { missingError.set(error); missingDone.countDown(); });
+            check(missingDone.await(4, TimeUnit.SECONDS) && missingError.get() != null,
+                    "Missing receiver state is an error, not stopped");
             System.out.println("TOTAL " + passed + " transport assertions passed");
         } finally { controller.close(); server.stop(0); }
     }

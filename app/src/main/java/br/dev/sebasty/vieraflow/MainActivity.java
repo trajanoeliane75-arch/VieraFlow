@@ -90,33 +90,62 @@ public final class MainActivity extends Activity {
     private View chromeHeadline, chromeConnection, chromeFooter, chromeStatus;
     private TextView expandButton;
     private boolean browserExpanded;
+    private final PlaybackState playbackState = new PlaybackState();
+    private boolean localCastActive;
+    private int playbackRevision;
+    private boolean transportCommandPending;
     private final Runnable pollTvPosition = new Runnable() {
         @Override public void run() {
-            if (tvPlaying && tv != null && !positionPending) {
+            if (tv != null && !preparing && !transportCommandPending && !positionPending) {
                 final DlnaController.Device device = tv;
+                final int generation = queueGeneration, revision = playbackRevision;
                 positionPending = true;
-                controller.getPosition(device, (position, error) -> runOnUiThread(() -> {
+                controller.getPlayback(device, (playback, error) -> runOnUiThread(() -> {
                     positionPending = false;
-                    if (isDestroyed() || !tvPlaying || tv != device) return;
-                    if (position != null && position.elapsedMs >= 0) {
+                    if (isDestroyed() || preparing || transportCommandPending || tv != device
+                            || generation != queueGeneration || revision != playbackRevision) return;
+                    String before = playbackState.label();
+                    playbackState.update(playback);
+                    tvPlaying = playbackState.active();
+                    sendButton.setEnabled(true);
+                    sendButton.setText(tvPlaying ? "Controle da TV" : "Enviar à TV");
+                    String label = playbackState.label();
+                    DlnaController.Position position = playback == null ? null : playback.position;
+                    if (tvPlaying && position != null && position.elapsedMs >= 0) {
                         lastTvElapsedMs = position.elapsedMs;
                         lastTvDurationMs = position.durationMs;
-                        timeLabel.setText("Na TV  " + DlnaController.clock(lastTvElapsedMs)
-                                + (lastTvDurationMs > 0 ? " / " + DlnaController.clock(lastTvDurationMs) : ""));
-                        getPreferences(Context.MODE_PRIVATE).edit()
+                        label += " · " + DlnaController.clock(lastTvElapsedMs)
+                                + (lastTvDurationMs > 0 ? " / " + DlnaController.clock(lastTvDurationMs) : "");
+                        if (localCastActive) getPreferences(Context.MODE_PRIVATE).edit()
                                 .putLong("resumeTimeMs", lastTvElapsedMs).apply();
-                    } else if (timeLabel != null) {
-                        timeLabel.setText("Na TV · posição indisponível");
+                    } else {
+                        lastTvElapsedMs = -1; lastTvDurationMs = -1;
                     }
-                    if (proxyStreamIssue) {
-                        // A transport query succeeded; it does not prove the TV decoded all bytes.
-                        timeLabel.setText("Conexão instável · ver diagnóstico");
+                    timeLabel.setText(label);
+                    if (playbackState.terminal()) {
+                        if (localCastActive) {
+                            queueGeneration++;
+                            if (mediaTask != null) mediaTask.cancel(true);
+                        }
+                        boolean wasCasting = localCastActive;
+                        localCastActive = false;
+                        getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                        releaseStreamingLocks();
+                        if (wasCasting || !before.equals(playbackState.label()))
+                            setStatus(playbackState.label() + ". Você pode enviar outro vídeo ou testar outra fonte.");
+                    } else if (!before.equals(playbackState.label())) {
+                        setStatus(playbackState.label());
                     }
+                    // No automatic Play/Stop: a failed query is not proof playback stopped.
                 }));
             }
-            handler.postDelayed(this, 15000);
+            handler.postDelayed(this, 10000);
         }
     };
+    private void refreshPlaybackSoon() {
+        handler.removeCallbacks(pollTvPosition);
+        handler.post(pollTvPosition);
+    }
     private String pageUrl = "https://www.google.com/";
     private final Runnable pollVideos = new Runnable() {
         @Override public void run() {
@@ -138,6 +167,7 @@ public final class MainActivity extends Activity {
         proxy.setProgressListener(message -> android.util.Log.d("VieraFlow", "Proxy: " + message));
         proxy.setErrorListener(error -> runOnUiThread(() -> {
             if (isDestroyed()) return;
+            if (!localCastActive && !preparing) return;
             proxyStreamIssue = true;
             proxyIssueMessage = error;
             // The HTTP socket closing does not prove the TV has stopped decoding buffered media.
@@ -365,7 +395,9 @@ public final class MainActivity extends Activity {
         timeLabel = text("Na TV · sem reprodução", 12, MUTED, false);
         footer.addView(timeLabel, margins(-1, 18, 3, 0, 0, 3));
         LinearLayout controls = new LinearLayout(this);
-        sendButton = button("Enviar à TV", true, v -> cast());
+        sendButton = button("Enviar à TV", true, v -> {
+            if (tvPlaying) showPlayerControls(); else cast();
+        });
         controls.addView(sendButton, new LinearLayout.LayoutParams(0, dp(52), 1));
         controls.addView(iconButton(R.drawable.ic_pause, "Pausar na TV", v -> remote("Pause", "Pausado")), margins(48, 52, 8, 0, 0, 0));
         controls.addView(iconButton(R.drawable.ic_play, "Retomar na TV", v -> remote("Play", "Reproduzindo")), margins(48, 52, 8, 0, 0, 0));
@@ -447,6 +479,7 @@ public final class MainActivity extends Activity {
                 }).show();
     }
     private void showSources() {
+        if (preparing) { setStatus("Aguarde a verificação da fonte atual."); return; }
         if (detectedUrls.isEmpty() && candidateUrl == null) {
             setStatus("Nenhuma fonte ainda. Inicie o player e toque em Detectar novamente.");
             return;
@@ -459,7 +492,7 @@ public final class MainActivity extends Activity {
             String format = path != null && path.toLowerCase(Locale.ROOT).endsWith(".m3u8") ? "HLS" : "Vídeo";
             labels[i] = "Fonte " + (i + 1) + " · " + format + " · " + Uri.parse(urls.get(i)).getHost();
         }
-        new AlertDialog.Builder(this).setTitle("Selecionar fonte")
+        new AlertDialog.Builder(this).setTitle("Toque numa fonte para testar na TV")
                 .setItems(labels, (dialog, index) -> {
                     String selected = urls.get(index);
                     candidateUrl = selected;
@@ -807,7 +840,10 @@ public final class MainActivity extends Activity {
                 .setItems(options, (dialog, which) -> selectTv(tvs.get(which))).show();
     }
     private void selectTv(DlnaController.Device device) {
+        playbackRevision++;
+        tvPlaying = false; playbackState.reset();
         tv = device; deviceLabel.setText(device.name);
+        refreshPlaybackSoon();
         discoverButton.setText("Controle");
         setStatus("Conectada: " + device.name + " (DLNA/DMR)");
     }
@@ -909,7 +945,7 @@ public final class MainActivity extends Activity {
         return best == null ? fallback : best;
     }
     private void castUrl(String url, boolean autoSelect, List<String> sources) {
-        if (preparing || tv == null) return;
+        if (preparing || transportCommandPending || tv == null) return;
         final int generation = ++queueGeneration;
         if (mediaTask != null) mediaTask.cancel(true);
         final DlnaController.Device destination = tv;
@@ -1050,7 +1086,9 @@ public final class MainActivity extends Activity {
         if (isDestroyed()) return;
         preparing = false; sendButton.setEnabled(true); sendButton.setText("Enviar à TV");
         if (error == null) {
-            tvPlaying = true;
+            tvPlaying = true; localCastActive = true;
+            sendButton.setText("Controle da TV");
+            refreshPlaybackSoon();
             getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             getPreferences(Context.MODE_PRIVATE).edit().putString("resumePage", castingPage)
                     .putString("resumeTitle", castingTitle).putLong("resumeTimeMs", 0).apply();
@@ -1059,9 +1097,12 @@ public final class MainActivity extends Activity {
         } else {
             tvPlaying = false;
             if (error.contains("código 716")) error += "\n\nDiagnóstico: " + proxy.diagnostic();
-            getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            releaseStreamingLocks();
+            if (!localCastActive) {
+                getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                releaseStreamingLocks();
+            }
             setStatus(error);
+            refreshPlaybackSoon();
             new AlertDialog.Builder(this).setTitle("Não foi possível reproduzir")
                     .setMessage(error).setPositiveButton("OK", null).show();
         }
@@ -1072,17 +1113,23 @@ public final class MainActivity extends Activity {
     }
     private void remote(String action, String success) {
         if (tv == null) { setStatus("Conecte a TV primeiro."); return; }
+        if (transportCommandPending || (preparing && !"Stop".equals(action))) {
+            setStatus("Aguarde o comando atual da TV."); return;
+        }
+        final DlnaController.Device destination = tv;
+        final int revision = ++playbackRevision;
+        transportCommandPending = true;
         if ("Stop".equals(action)) {
-            tvPlaying = false;
-            if (timeLabel != null) timeLabel.setText("Na TV · parado");
+            preparing = false; sendButton.setEnabled(true);
+            sendButton.setText("Consultar TV…");
             queueGeneration++;
             if (mediaTask != null) mediaTask.cancel(true);
-            preparing = false; sendButton.setEnabled(true); sendButton.setText("Enviar à TV");
         }
-        controller.command(tv, action, error -> runOnUiThread(() -> {
-            if (isDestroyed()) return;
-            if (error == null && "Stop".equals(action)) { getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); releaseStreamingLocks(); }
-            setStatus(error == null ? success + " na TV." : "Falha no controle: " + error);
+        controller.command(destination, action, error -> runOnUiThread(() -> {
+            transportCommandPending = false;
+            if (isDestroyed() || tv != destination || revision != playbackRevision) return;
+            setStatus(error == null ? "Comando enviado. Consultando estado da TV…" : "Falha no controle: " + error);
+            refreshPlaybackSoon();
         }));
     }
 

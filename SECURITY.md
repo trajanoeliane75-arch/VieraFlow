@@ -1,7 +1,7 @@
-# Política de segurança
+# Segurança
 
-Não faça commit de `*.keystore`, `*.jks`, senhas, chaves privadas, tokens de CDN, URLs autenticadas ou cookies. O keystore original das versões anteriores fica fora deste repositório público.
+**Nunca faça commit** de arquivos `*.keystore`, `*.jks`, senhas, tokens de CDN, cookies, chaves de assinatura ou dados pessoais. Nenhuma chave privada do histórico do projeto é distribuída com este repositório.
 
-O proxy HTTP é destinado a uma rede Wi-Fi de confiança. O token aleatório da URL não constitui autenticação robusta; nunca exponha o servidor de mídia à Internet.
+O servidor HTTP local foi desenvolvido para uma rede Wi-Fi confiável. O token da URL é efêmero, mas não substitui autenticação forte, TLS ou isolamento adequado; não exponha esse servidor à internet.
 
-Para reportar uma vulnerabilidade, entre em contato privadamente com o mantenedor antes de publicar detalhes de exploração. Redija dados sensíveis dos logs.
+Não inclua URLs privadas ou dados sensíveis em logs de Issues. Para falhas de segurança, contate o mantenedor em particular antes de divulgar uma exploração.

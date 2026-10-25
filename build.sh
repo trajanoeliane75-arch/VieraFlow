@@ -33,7 +33,7 @@ fi
 "${TOOLS}/aapt2" link -o "${OUTPUT_DIR}/uncompiled.apk" -I "${ANDROID_JAR}" \
     --manifest "${PROJECT_DIR}/app/src/main/AndroidManifest.xml" \
     --java "${OUTPUT_DIR}/generated" -R "${OUTPUT_DIR}/resources.zip" --auto-add-overlay \
-    --min-sdk-version 26 --target-sdk-version 34 --version-code 13 --version-name 0.2.0-rc1
+    --min-sdk-version 26 --target-sdk-version 34 --version-code 14 --version-name 0.2.1-rc1
 
 find "${PROJECT_DIR}/app/src/main/java" "${OUTPUT_DIR}/generated" -type f -name '*.java' -print > "${OUTPUT_DIR}/sources.txt"
 if command -v javac >/dev/null; then
@@ -56,6 +56,6 @@ if [[ ! -f "$KEYSTORE" ]]; then
         -dname "CN=VieraFlow Teste,O=Sebasty" -keyalg RSA -keysize 2048 -validity 3650
 fi
 "${TOOLS}/apksigner" sign --ks "$KEYSTORE" --ks-key-alias vieraflow --ks-pass pass:android \
-    --key-pass pass:android --out "${PROJECT_DIR}/VieraFlow-0.2.0-rc1-debug.apk" "${OUTPUT_DIR}/aligned.apk"
-"${TOOLS}/apksigner" verify --verbose "${PROJECT_DIR}/VieraFlow-0.2.0-rc1-debug.apk"
-echo "APK gerado: ${PROJECT_DIR}/VieraFlow-0.2.0-rc1-debug.apk"
+    --key-pass pass:android --out "${PROJECT_DIR}/VieraFlow-0.2.1-rc1-debug.apk" "${OUTPUT_DIR}/aligned.apk"
+"${TOOLS}/apksigner" verify --verbose "${PROJECT_DIR}/VieraFlow-0.2.1-rc1-debug.apk"
+echo "APK gerado: ${PROJECT_DIR}/VieraFlow-0.2.1-rc1-debug.apk"

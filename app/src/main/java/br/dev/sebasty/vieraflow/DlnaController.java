@@ -83,6 +83,36 @@ public final class DlnaController {
             listener.updated(result, error);
         });
     }
+    public interface PlaybackListener { void updated(Playback playback, String error); }
+    public static final class Playback {
+        public final String state, status;
+        public final Position position;
+        Playback(String state, String status, Position position) {
+            this.state = state; this.status = status; this.position = position;
+        }
+    }
+    /** Transport state is authoritative; unsupported position must not hide it. */
+    public void getPlayback(Device device, PlaybackListener listener) {
+        background.execute(() -> {
+            Playback result = null; String error = null;
+            try {
+                String response = soap(device, "GetTransportInfo", "<InstanceID>0</InstanceID>");
+                Element root = parse(new java.io.ByteArrayInputStream(
+                        response.getBytes(StandardCharsets.UTF_8))).getDocumentElement();
+                String state = childText(root, "CurrentTransportState");
+                if (state.isEmpty()) throw new IOException("A TV não informou o estado do player.");
+                String status = childText(root, "CurrentTransportStatus");
+                Position position = null;
+                if ("PLAYING".equals(state) || "PAUSED_PLAYBACK".equals(state)) {
+                    try { position = readPosition(device); }
+                    catch (Exception ignored) { /* Position is optional on legacy receivers. */ }
+                }
+                result = new Playback(state, status, position);
+            } catch (Exception ex) { error = ex.getMessage(); }
+            listener.updated(result, error);
+        });
+    }
+
     /** Seek is only attempted when the renderer reports a real relative time. */
     public void seekBy(Device device, long deltaMs, ResultListener listener) {
         commands.execute(() -> {

@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TEST_BUILD="$ROOT/build/tests"
 mkdir -p "$TEST_BUILD"
 find "$ROOT/tests/stubs" -name '*.java' > "$TEST_BUILD/sources.txt"
-for name in HlsStream Navigation StreamProxy DlnaController; do
+for name in HlsStream Navigation StreamProxy DlnaController PlaybackState; do
     printf '%s\n' "$ROOT/app/src/main/java/br/dev/sebasty/vieraflow/$name.java" >> "$TEST_BUILD/sources.txt"
 done
 printf '%s\n' "$ROOT/tests/IntegrationTest.java" >> "$TEST_BUILD/sources.txt"

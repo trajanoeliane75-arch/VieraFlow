@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="oneui_background">#F7F8FB</color>
+    <color name="oneui_surface">#FFFFFF</color>
+    <color name="oneui_primary">#3179EF</color>
+    <color name="oneui_primary_pressed">#2365D6</color>
+    <color name="oneui_text">#17191D</color>
+    <color name="oneui_subtext">#747782</color>
+    <color name="oneui_stroke">#E7E9F1</color>
+    <color name="oneui_success">#207A4E</color>
+</resources>

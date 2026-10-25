@@ -1,3 +1,4 @@
+# Generated build outputs and local test fixtures
 /build/
 /tests/fixtures/
 *.apk
@@ -11,8 +12,11 @@
 *.pfx
 *.key
 *.pem
+*.mobileprovision
 *.log
 local.properties
 .gradle/
 .idea/
 .DS_Store
+
+.codex-attachments/
